@@ -45,6 +45,7 @@ BarWidget {
     var cx = draggedCard.x + draggedCard.width / 2
     var cy = draggedCard.y + draggedCard.height / 2
     var target = -1
+    var pad = grid.gap / 2
     for (var i = 0; i < notesModel.count; i++) {
       if (i === draggedCard.index) continue
       var r = board.rects[i]
@@ -53,7 +54,7 @@ BarWidget {
       var ry = r.r * (grid.rowH + grid.gap)
       var rw = r.w * grid.cell + (r.w - 1) * grid.gap
       var rh = r.h * grid.rowH + (r.h - 1) * grid.gap
-      if (cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh) {
+      if (cx >= rx - pad && cx <= rx + rw + pad && cy >= ry - pad && cy <= ry + rh + pad) {
         target = i
         break
       }
@@ -729,8 +730,8 @@ BarWidget {
               delegate: NoteCard {
                 readonly property var rect: root.board.rects[index] || null
                 visible: rect !== null
-                x: rect ? rect.c * (grid.cell + grid.gap) : 0
-                y: rect ? rect.r * (grid.rowH + grid.gap) : 0
+                targetX: rect ? rect.c * (grid.cell + grid.gap) : 0
+                targetY: rect ? rect.r * (grid.rowH + grid.gap) : 0
                 width: rect ? rect.w * grid.cell + (rect.w - 1) * grid.gap : 0
                 height: rect ? rect.h * grid.rowH + (rect.h - 1) * grid.gap : 0
               }
@@ -774,6 +775,13 @@ BarWidget {
     readonly property color inkSoft: Qt.rgba(ink.r, ink.g, ink.b, 0.5)
     readonly property color paper: store.colorFor(colorKey)
     property bool settled: false
+
+    property real targetX: 0
+    property real targetY: 0
+    property real dragDeltaX: 0
+    property real dragDeltaY: 0
+    x: targetX + dragDeltaX
+    y: targetY + dragDeltaY
 
     readonly property bool isDragging: root.draggingNoteId === noteId
     readonly property bool isDropTarget: root.dropTargetIndex === index && root.draggingNoteId !== "" && !isDragging
@@ -885,44 +893,6 @@ BarWidget {
       }
     }
 
-    // Top drag zone (click and drag the header bar to reorder)
-    MouseArea {
-      id: cardHeaderDrag
-      anchors { top: parent.top; left: parent.left; right: tools.left; bottom: parent.top; bottomMargin: -card.bodyTop }
-      cursorShape: pressed ? Qt.ClosedHandCursor : (containsMouse ? Qt.OpenHandCursor : Qt.ArrowCursor)
-      hoverEnabled: true
-
-      property real grabX: 0
-      property real grabY: 0
-
-      onPressed: function(mouse) {
-        var p = mapToItem(grid, mouse.x, mouse.y)
-        grabX = p.x - card.x
-        grabY = p.y - card.y
-      }
-      onPositionChanged: function(mouse) {
-        if (pressed) {
-          var p = mapToItem(grid, mouse.x, mouse.y)
-          if (!card.isDragging) {
-            if (Math.hypot(p.x - (card.x + grabX), p.y - (card.y + grabY)) > 4) {
-              root.draggingNoteId = card.noteId
-              root.dropTargetIndex = -1
-            }
-          }
-          if (card.isDragging) {
-            card.x = Math.max(0, Math.min(grid.width - card.width, p.x - grabX))
-            card.y = Math.max(0, p.y - grabY)
-            root.updateDropTarget(card)
-          }
-        }
-      }
-      onReleased: {
-        if (card.isDragging) {
-          root.finalizeDrop(card.index)
-        }
-      }
-    }
-
     // Top controls (show on hover / focus)
     Row {
       id: tools
@@ -934,30 +904,53 @@ BarWidget {
       CardButton {
         glyph: ""   // 4-way move/drag
         ink: card.ink
-        cursorShape: Qt.OpenHandCursor
+        cursorShape: card.isDragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+
+        property real startMouseGridX: 0
+        property real startMouseGridY: 0
+
         onPressed: function(mouse) {
           var p = mapToItem(grid, mouse.x, mouse.y)
-          cardHeaderDrag.grabX = p.x - card.x
-          cardHeaderDrag.grabY = p.y - card.y
+          startMouseGridX = p.x
+          startMouseGridY = p.y
+          card.dragDeltaX = 0
+          card.dragDeltaY = 0
         }
+
         onPositionChanged: function(mouse) {
-          var p = mapToItem(grid, mouse.x, mouse.y)
-          if (!card.isDragging) {
-            if (Math.hypot(p.x - (card.x + cardHeaderDrag.grabX), p.y - (card.y + cardHeaderDrag.grabY)) > 4) {
-              root.draggingNoteId = card.noteId
-              root.dropTargetIndex = -1
+          if (mouse.buttons & Qt.LeftButton) {
+            var p = mapToItem(grid, mouse.x, mouse.y)
+            var dx = p.x - startMouseGridX
+            var dy = p.y - startMouseGridY
+            if (!card.isDragging) {
+              if (Math.hypot(dx, dy) > 4) {
+                root.draggingNoteId = card.noteId
+                root.dropTargetIndex = -1
+              }
+            }
+            if (card.isDragging) {
+              card.dragDeltaX = dx
+              card.dragDeltaY = dy
+              root.updateDropTarget(card)
             }
           }
-          if (card.isDragging) {
-            card.x = Math.max(0, Math.min(grid.width - card.width, p.x - cardHeaderDrag.grabX))
-            card.y = Math.max(0, p.y - cardHeaderDrag.grabY)
-            root.updateDropTarget(card)
-          }
         }
-        onReleased: {
+
+        onReleased: function() {
           if (card.isDragging) {
             root.finalizeDrop(card.index)
           }
+          card.dragDeltaX = 0
+          card.dragDeltaY = 0
+        }
+
+        onCanceled: function() {
+          if (card.isDragging) {
+            root.draggingNoteId = ""
+            root.dropTargetIndex = -1
+          }
+          card.dragDeltaX = 0
+          card.dragDeltaY = 0
         }
       }
       CardButton {
@@ -1104,6 +1097,7 @@ BarWidget {
     signal pressed(var mouse)
     signal positionChanged(var mouse)
     signal released(var mouse)
+    signal canceled()
     readonly property bool wide: glyph.length > 1
     height: Style.space(24)
     width: wide ? lbl.implicitWidth + Style.space(14) : height
@@ -1128,6 +1122,7 @@ BarWidget {
       onPressed: function(mouse) { btn.pressed(mouse) }
       onPositionChanged: function(mouse) { btn.positionChanged(mouse) }
       onReleased: function(mouse) { btn.released(mouse) }
+      onCanceled: function() { btn.canceled() }
     }
   }
 }

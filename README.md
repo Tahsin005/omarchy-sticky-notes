@@ -23,7 +23,7 @@ in the panel, never on the desktop.
   all your notes outgrow the panel.
 - **Type right away**: a new note gets the cursor as soon as it is created.
 - **Hover a note** for five buttons:
-  - **Move**: drag to reorder notes on the board (or grab the note's top header bar).
+  - **Move**: hold and drag the 4-way move icon to reorder notes on the board.
   - **Pin**: pinned notes stay at the top.
   - **Color**: pick from 8 sticky note colors (yellow, pink, blue, green, orange, purple, gray, charcoal) with automatic contrast.
   - **Resize**: switches the note between narrow and wide. Height always follows
