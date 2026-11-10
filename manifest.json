@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.tahsin005.sticky-notes",
   "name": "Sticky Notes",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "author": "Tahsin005",
   "license": "MIT",
-  "description": "Yellow sticky notes in a bento-style bar panel: pin, resize and delete notes; Ctrl+N new note, Esc closes. Saved to ~/.local/share/omarchy-sticky-notes/notes.json.",
+  "description": "Colorful sticky notes in a bento-style bar panel: 8-color palette, search filter, drag-and-drop reordering, pin, resize and delete notes; Ctrl+N new note, Ctrl+F search, Esc closes. Saved to ~/.local/share/omarchy-sticky-notes/notes.json.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Sticky Notes",
-    "description": "A panel of yellow sticky notes you can type into, laid out as a bento board.",
+    "description": "A panel of colorful sticky notes you can type into, laid out as a bento board with search and reordering.",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "left"

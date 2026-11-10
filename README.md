@@ -22,14 +22,17 @@ in the panel, never on the desktop.
   board outside *View all*) before it gets very tall. The board scrolls only if
   all your notes outgrow the panel.
 - **Type right away**: a new note gets the cursor as soon as it is created.
-- **Hover a note** for three buttons:
+- **Hover a note** for five buttons:
+  - **Move**: drag to reorder notes on the board (or grab the note's top header bar).
   - **Pin**: pinned notes stay at the top.
+  - **Color**: pick from 8 sticky note colors (yellow, pink, blue, green, orange, purple, gray, charcoal) with automatic contrast.
   - **Resize**: switches the note between narrow and wide. Height always follows
     the text.
   - **Delete**: the trash icon turns red; click again within 3 seconds to delete.
     Empty notes delete on the first click.
+- **Search filter**: instant search across your notes with `Ctrl+F` or the header search box; press `Esc` to clear.
 - **View all**: the panel shows 6 notes; *View all* widens it to every note.
-- **Keys in the panel**: `Ctrl+N` new note, `Esc` close.
+- **Keys in the panel**: `Ctrl+N` new note, `Ctrl+F` search, `Esc` close.
 - **Saved automatically** to `~/.local/share/omarchy-sticky-notes/notes.json`, and kept
   in sync across monitors. Only your account can read them: the folder is `0700` and
   the file `0600`, whatever your umask (files left readable by older versions are

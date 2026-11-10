@@ -22,7 +22,57 @@ BarWidget {
   property bool showAll: false          // "View all" expanded panel
   readonly property int compactLimit: 6
   readonly property int boardCols: showAll ? 6 : 4
-  readonly property var board: computeBoard(store.rev, fitRev, boardCols, showAll)
+  property string searchQuery: ""
+  readonly property string searchFilter: searchQuery.trim().toLowerCase()
+  readonly property bool isSearching: searchFilter.length > 0
+  readonly property int matchingCount: {
+    store.rev
+    if (!searchFilter) return notesModel.count
+    var cnt = 0
+    for (var i = 0; i < notesModel.count; i++) {
+      var t = notesModel.get(i).text || ""
+      if (t.toLowerCase().indexOf(searchFilter) >= 0) cnt++
+    }
+    return cnt
+  }
+
+  // Drag and drop state
+  property string draggingNoteId: ""
+  property int dropTargetIndex: -1
+
+  function updateDropTarget(draggedCard) {
+    if (isSearching) return
+    var cx = draggedCard.x + draggedCard.width / 2
+    var cy = draggedCard.y + draggedCard.height / 2
+    var target = -1
+    for (var i = 0; i < notesModel.count; i++) {
+      if (i === draggedCard.index) continue
+      var r = board.rects[i]
+      if (!r) continue
+      var rx = r.c * (grid.cell + grid.gap)
+      var ry = r.r * (grid.rowH + grid.gap)
+      var rw = r.w * grid.cell + (r.w - 1) * grid.gap
+      var rh = r.h * grid.rowH + (r.h - 1) * grid.gap
+      if (cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh) {
+        target = i
+        break
+      }
+    }
+    dropTargetIndex = target
+  }
+
+  function finalizeDrop(fromIndex) {
+    var target = dropTargetIndex
+    draggingNoteId = ""
+    dropTargetIndex = -1
+    if (target >= 0 && target !== fromIndex) {
+      store.moveNote(fromIndex, target)
+    } else {
+      store.rev++
+    }
+  }
+
+  readonly property var board: computeBoard(store.rev, fitRev, boardCols, showAll, searchFilter)
 
   // Each card measures its text and reports the span it needs, by note id:
   // { w: columns, h: rows }. A span depends only on the text and the column
@@ -42,7 +92,7 @@ BarWidget {
   // Bento packing: place each note (in order) at the first free spot that
   // fits its measured span. Returns a cell rect per note (null = not shown)
   // + row count.
-  function computeBoard(_rev, _fit, cols, all) {
+  function computeBoard(_rev, _fit, cols, all, filter) {
     var occ = [], rects = [], rows = 0
     function free(r, c, w, h) {
       for (var y = r; y < r + h; y++)
@@ -50,8 +100,13 @@ BarWidget {
       return true
     }
     for (var i = 0; i < notesModel.count; i++) {
-      if (!all && i >= compactLimit) { rects.push(null); continue }
-      var f = fit[notesModel.get(i).noteId]
+      var n = notesModel.get(i)
+      if (filter && (!n.text || n.text.toLowerCase().indexOf(filter) < 0)) {
+        rects.push(null)
+        continue
+      }
+      if (!filter && !all && i >= compactLimit) { rects.push(null); continue }
+      var f = fit[n.noteId]
       var w = Math.min(f ? f.w : store.colsOf(store.sizeAt(i)), cols), h = f ? f.h : 1, done = false
       for (var r = 0; !done; r++) {
         for (var c = 0; c <= cols - w; c++) {
@@ -66,7 +121,12 @@ BarWidget {
     }
     return { rects: rects, rows: rows }
   }
-  onPopupOpenChanged: if (!popupOpen) showAll = false
+  onPopupOpenChanged: {
+    if (!popupOpen) {
+      showAll = false
+      searchQuery = ""
+    }
+  }
   readonly property var svc: store
   readonly property int count: notesModel.count
 
@@ -202,6 +262,17 @@ BarWidget {
       var pin = !notesModel.get(i).pinned
       notesModel.setProperty(i, "pinned", pin)
       notesModel.move(i, pin ? 0 : pinnedCount(), 1)
+      rev++
+      save()
+    }
+    function moveNote(fromIndex, toIndex) {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex || fromIndex >= notesModel.count || toIndex >= notesModel.count) return
+      var pCount = pinnedCount()
+      var willBePinned = toIndex < pCount
+      if (fromIndex < pCount && toIndex >= pCount) willBePinned = false
+      if (fromIndex >= pCount && toIndex < pCount) willBePinned = true
+      notesModel.setProperty(fromIndex, "pinned", willBePinned)
+      notesModel.move(fromIndex, toIndex, 1)
       rev++
       save()
     }
@@ -364,6 +435,15 @@ BarWidget {
         onActivated: { store.addNote(); flick.contentY = 0 }
       }
       Shortcut {
+        sequence: "Ctrl+F"
+        context: Qt.WindowShortcut
+        enabled: root.popupOpen
+        onActivated: {
+          searchInput.forceActiveFocus()
+          searchInput.selectAll()
+        }
+      }
+      Shortcut {
         sequence: "Escape"
         context: Qt.WindowShortcut
         enabled: root.popupOpen
@@ -404,7 +484,7 @@ BarWidget {
             Text {
               id: countText
               anchors.centerIn: parent
-              text: root.count
+              text: root.isSearching ? root.matchingCount + "/" + root.count : root.count
               color: root.accent
               font.family: root.uiFont
               font.pixelSize: Style.space(11)
@@ -434,6 +514,87 @@ BarWidget {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: { store.addNote(); flick.contentY = 0 }
+          }
+        }
+
+        Rectangle {
+          id: searchBox
+          anchors {
+            right: (viewAll.visible ? viewAll.left : newBtn.left)
+            rightMargin: Style.space(8)
+            verticalCenter: parent.verticalCenter
+          }
+          height: Style.space(26)
+          width: (searchInput.activeFocus || root.searchQuery) ? Style.space(190) : Style.space(140)
+          radius: Style.space(6)
+          color: searchInput.activeFocus ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12) : root.raised
+          border.width: 1
+          border.color: searchInput.activeFocus ? root.accent : root.hairline
+          Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+          Text {
+            id: searchIcon
+            anchors { left: parent.left; leftMargin: Style.space(8); verticalCenter: parent.verticalCenter }
+            text: ""   // fa-search
+            color: searchInput.activeFocus ? root.accent : root.subtle
+            font.family: root.uiFont
+            font.pixelSize: Style.space(11)
+          }
+
+          TextInput {
+            id: searchInput
+            anchors {
+              left: searchIcon.right
+              leftMargin: Style.space(6)
+              right: clearBtn.visible ? clearBtn.left : parent.right
+              rightMargin: clearBtn.visible ? Style.space(4) : Style.space(8)
+              verticalCenter: parent.verticalCenter
+            }
+            clip: true
+            color: root.fg
+            font.family: root.uiFont
+            font.pixelSize: Style.space(11)
+            selectByMouse: true
+            selectionColor: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
+            selectedTextColor: root.fg
+            text: root.searchQuery
+            onTextChanged: if (root.searchQuery !== text) root.searchQuery = text
+
+            Text {
+              visible: !searchInput.text && !searchInput.activeFocus
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Search... (Ctrl+F)"
+              color: root.subtle
+              font: searchInput.font
+            }
+
+            Keys.onEscapePressed: function(event) {
+              if (text !== "") {
+                text = ""
+                event.accepted = true
+              } else {
+                focus = false
+                event.accepted = false
+              }
+            }
+          }
+
+          Text {
+            id: clearBtn
+            visible: searchInput.text !== ""
+            anchors { right: parent.right; rightMargin: Style.space(6); verticalCenter: parent.verticalCenter }
+            text: ""   // fa-times
+            color: clearMouse.containsMouse ? root.fg : root.subtle
+            font.family: root.uiFont
+            font.pixelSize: Style.space(11)
+            MouseArea {
+              id: clearMouse
+              anchors.fill: parent
+              anchors.margins: -Style.space(4)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: { searchInput.text = ""; searchInput.forceActiveFocus() }
+            }
           }
         }
 
@@ -507,10 +668,37 @@ BarWidget {
           }
         }
 
+        Column {
+          visible: root.count > 0 && root.matchingCount === 0
+          anchors.centerIn: parent
+          spacing: Style.space(8)
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: ""
+            color: root.hairline
+            font.family: root.uiFont
+            font.pixelSize: Style.space(36)
+          }
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "No matching notes"
+            color: root.fg
+            font.family: root.uiFont
+            font.pixelSize: Style.space(13)
+          }
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "No notes contain \"" + root.searchQuery + "\""
+            color: root.subtle
+            font.family: root.uiFont
+            font.pixelSize: Style.space(11)
+          }
+        }
+
         Flickable {
           id: flick
           anchors.fill: parent
-          visible: root.count > 0
+          visible: root.matchingCount > 0
           contentWidth: width
           contentHeight: grid.implicitHeight
           clip: true
@@ -556,9 +744,11 @@ BarWidget {
         id: footer
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: (!root.showAll && root.count > root.compactLimit
-                ? (root.count - root.compactLimit) + " more in View all  ·  " : "")
-              + "Ctrl+N new note  ·  Pinned notes stay on top  ·  Esc to close  ·  Super+M"
+        text: (root.isSearching
+                ? root.matchingCount + (root.matchingCount === 1 ? " note found" : " notes found") + "  ·  Esc clears search"
+                : (!root.showAll && root.count > root.compactLimit
+                    ? (root.count - root.compactLimit) + " more in View all  ·  " : "")
+                  + "Ctrl+N new  ·  Ctrl+F search  ·  Drag to reorder  ·  Esc to close")
         color: root.subtle
         opacity: 0.8
         font.family: root.uiFont
@@ -584,8 +774,15 @@ BarWidget {
     readonly property color inkSoft: Qt.rgba(ink.r, ink.g, ink.b, 0.5)
     readonly property color paper: store.colorFor(colorKey)
     property bool settled: false
-    Behavior on x { enabled: card.settled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-    Behavior on y { enabled: card.settled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+    readonly property bool isDragging: root.draggingNoteId === noteId
+    readonly property bool isDropTarget: root.dropTargetIndex === index && root.draggingNoteId !== "" && !isDragging
+    z: isDragging ? 100 : (isDropTarget ? 10 : (card.hot ? 5 : 1))
+    scale: isDragging ? 1.04 : 1.0
+    Behavior on scale { NumberAnimation { duration: 120 } }
+
+    Behavior on x { enabled: card.settled && !card.isDragging; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on y { enabled: card.settled && !card.isDragging; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     Behavior on width { enabled: card.settled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     Behavior on height { enabled: card.settled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     readonly property bool hot: cardHover.hovered || body.activeFocus
@@ -638,13 +835,25 @@ BarWidget {
     // soft drop shadow
     Rectangle {
       anchors.fill: paperRect
-      anchors.topMargin: Style.space(3)
+      anchors.topMargin: card.isDragging ? Style.space(8) : Style.space(3)
       anchors.leftMargin: Style.space(1)
       anchors.rightMargin: -Style.space(1)
-      anchors.bottomMargin: -Style.space(4)
+      anchors.bottomMargin: card.isDragging ? -Style.space(10) : -Style.space(4)
       radius: paperRect.radius
       color: "#000000"
-      opacity: body.activeFocus ? 0.6 : card.hot ? 0.45 : 0.3
+      opacity: card.isDragging ? 0.75 : (body.activeFocus ? 0.6 : card.hot ? 0.45 : 0.3)
+      Behavior on opacity { NumberAnimation { duration: 120 } }
+    }
+
+    // Drop target highlight outline
+    Rectangle {
+      anchors.fill: parent
+      radius: paperRect.radius
+      color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.15)
+      border.width: card.isDropTarget ? 2 : 0
+      border.color: root.accent
+      visible: card.isDropTarget
+      z: 20
     }
 
     // the paper, with its bottom-right corner folded over
@@ -676,14 +885,81 @@ BarWidget {
       }
     }
 
+    // Top drag zone (click and drag the header bar to reorder)
+    MouseArea {
+      id: cardHeaderDrag
+      anchors { top: parent.top; left: parent.left; right: tools.left; bottom: parent.top; bottomMargin: -card.bodyTop }
+      cursorShape: pressed ? Qt.ClosedHandCursor : (containsMouse ? Qt.OpenHandCursor : Qt.ArrowCursor)
+      hoverEnabled: true
+
+      property real grabX: 0
+      property real grabY: 0
+
+      onPressed: function(mouse) {
+        var p = mapToItem(grid, mouse.x, mouse.y)
+        grabX = p.x - card.x
+        grabY = p.y - card.y
+      }
+      onPositionChanged: function(mouse) {
+        if (pressed) {
+          var p = mapToItem(grid, mouse.x, mouse.y)
+          if (!card.isDragging) {
+            if (Math.hypot(p.x - (card.x + grabX), p.y - (card.y + grabY)) > 4) {
+              root.draggingNoteId = card.noteId
+              root.dropTargetIndex = -1
+            }
+          }
+          if (card.isDragging) {
+            card.x = Math.max(0, Math.min(grid.width - card.width, p.x - grabX))
+            card.y = Math.max(0, p.y - grabY)
+            root.updateDropTarget(card)
+          }
+        }
+      }
+      onReleased: {
+        if (card.isDragging) {
+          root.finalizeDrop(card.index)
+        }
+      }
+    }
+
     // Top controls (show on hover / focus)
     Row {
       id: tools
       anchors { top: parent.top; right: parent.right; topMargin: Style.space(6); rightMargin: Style.space(6) }
       spacing: Style.space(2)
-      opacity: card.hot || card.confirmDelete || card.showPalette ? 1 : 0
+      opacity: card.hot || card.confirmDelete || card.showPalette || card.isDragging ? 1 : 0
       Behavior on opacity { NumberAnimation { duration: 120 } }
 
+      CardButton {
+        glyph: ""   // 4-way move/drag
+        ink: card.ink
+        cursorShape: Qt.OpenHandCursor
+        onPressed: function(mouse) {
+          var p = mapToItem(grid, mouse.x, mouse.y)
+          cardHeaderDrag.grabX = p.x - card.x
+          cardHeaderDrag.grabY = p.y - card.y
+        }
+        onPositionChanged: function(mouse) {
+          var p = mapToItem(grid, mouse.x, mouse.y)
+          if (!card.isDragging) {
+            if (Math.hypot(p.x - (card.x + cardHeaderDrag.grabX), p.y - (card.y + cardHeaderDrag.grabY)) > 4) {
+              root.draggingNoteId = card.noteId
+              root.dropTargetIndex = -1
+            }
+          }
+          if (card.isDragging) {
+            card.x = Math.max(0, Math.min(grid.width - card.width, p.x - cardHeaderDrag.grabX))
+            card.y = Math.max(0, p.y - cardHeaderDrag.grabY)
+            root.updateDropTarget(card)
+          }
+        }
+        onReleased: {
+          if (card.isDragging) {
+            root.finalizeDrop(card.index)
+          }
+        }
+      }
       CardButton {
         glyph: ""   // pin
         ink: card.ink
@@ -691,7 +967,7 @@ BarWidget {
         onClicked: store.togglePin(card.noteId)
       }
       CardButton {
-        glyph: "\uf53f"   // palette
+        glyph: ""   // nf-fae-palette_color (palette icon)
         ink: card.ink
         active: card.showPalette
         onClicked: card.showPalette = !card.showPalette
@@ -823,7 +1099,11 @@ BarWidget {
     property color ink: "#262626"
     property bool danger: false
     property bool active: false
+    property int cursorShape: Qt.PointingHandCursor
     signal clicked()
+    signal pressed(var mouse)
+    signal positionChanged(var mouse)
+    signal released(var mouse)
     readonly property bool wide: glyph.length > 1
     height: Style.space(24)
     width: wide ? lbl.implicitWidth + Style.space(14) : height
@@ -843,8 +1123,11 @@ BarWidget {
       id: hover
       anchors.fill: parent
       hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
+      cursorShape: btn.cursorShape
       onClicked: btn.clicked()
+      onPressed: function(mouse) { btn.pressed(mouse) }
+      onPositionChanged: function(mouse) { btn.positionChanged(mouse) }
+      onReleased: function(mouse) { btn.released(mouse) }
     }
   }
 }
